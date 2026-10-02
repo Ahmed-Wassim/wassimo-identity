@@ -1,0 +1,114 @@
+services:
+
+  # ── identity: Laravel API ────────────────────────────────────────────────
+  identity:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "9075:8000"     # dev: curl localhost:9075/...
+    volumes:
+      - .:/var/www/html # live-reload: edit source, refresh
+    env_file:
+      - .env
+    environment:
+      # Container-local overrides — credentials come from .env via ${...};
+      # hostnames are Docker DNS names, meaningless outside the network.
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - wassimo-network
+
+  # ── identity-prod: production image parity check ────────────────────────
+  identity-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9076:8000"     # prod parity: diff responses against dev
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - wassimo-network
+
+  # ── identity-worker: queue worker for mail jobs ──────────────────────────
+  identity-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--max-time=3600"]
+    volumes:
+      - .:/var/www/html
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - wassimo-network
+
+  # ── mysql: identity_db ───────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secret
+      MYSQL_DATABASE: identity_db
+      MYSQL_USER: wassimo
+      MYSQL_PASSWORD: secret
+    ports:
+      - "3306:3306"
+    volumes:
+      - identity_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "wassimo", "-psecret"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - wassimo-network
+
+  # ── redis: shared cache + queues (ADR-015) ───────────────────────────────
+  # Port 6380 on the host avoids conflicts with any local Redis on 6379.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - wassimo-network
+
+volumes:
+  identity_mysql_data:
+
+networks:
+  wassimo-network:
+    external: true

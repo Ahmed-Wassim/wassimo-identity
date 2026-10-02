@@ -16,7 +16,7 @@ return [
     */
 
     'defaults' => [
-        'guard' => env('AUTH_GUARD', 'web'),
+        'guard' => env('AUTH_GUARD', 'api'),        // API is stateless; Sanctum is the default guard
         'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 
@@ -39,7 +39,16 @@ return [
 
     'guards' => [
         'web' => [
-            'driver' => 'session',
+            'driver'   => 'session',
+            'provider' => 'users',
+        ],
+
+        // The api guard is used by every route in routes/api.php.
+        // Sanctum validates the Bearer token and resolves the User from
+        // personal_access_tokens. Spatie permission checks also target this
+        // guard (guard_name = 'api' in the seeder). ADR-013 v2.
+        'api' => [
+            'driver'   => 'sanctum',
             'provider' => 'users',
         ],
     ],
