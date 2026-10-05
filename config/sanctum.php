@@ -2,46 +2,31 @@
 
 return [
 
-    /*
-    |--------------------------------------------------------------------------
-    | Stateful Domains
-    |--------------------------------------------------------------------------
-    | This service is a pure API — no browser clients, no SPA cookie sessions.
-    | Leave empty; Sanctum will only validate Authorization: Bearer tokens.
-    */
-
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', '')),
 
-    /*
-    |--------------------------------------------------------------------------
-    | Guard
-    |--------------------------------------------------------------------------
-    | Map Sanctum to the "api" guard defined in config/auth.php.
-    | Spatie permissions are seeded under guard_name="api" — both must match.
-    */
-
-    'guard' => ['api'],
+    // MUST stay ['web']. This is the session guard Sanctum checks FIRST for
+    // SPA cookie auth. Pointing it at 'api' (whose driver IS sanctum) makes
+    // Guard::__invoke call guard('api')->user() which re-enters __invoke —
+    // infinite recursion → 500 on every authenticated route.
+    'guard' => ['web'],
 
     /*
-    |--------------------------------------------------------------------------
-    | Token Expiration
-    |--------------------------------------------------------------------------
-    | 1440 minutes = 24 hours. ADR-013 v2: tokens expire; clients must handle
-    | re-authentication. Token refresh is deliberately deferred (ADR-013 §Deferred).
-    |
-    | The prune job runs daily via `php artisan sanctum:prune-expired --hours=24`.
-    | Without it, personal_access_tokens grows forever.
-    */
+     * Access tokens are short-lived (15 min default).
+     * The client uses the refresh token to obtain a new access token silently.
+     *
+     * Refresh tokens are long-lived (30 days = 43200 min default).
+     * They are stored under the ability "refresh" and are only accepted
+     * by POST /api/auth/refresh — nowhere else.
+     *
+     * The legacy SANCTUM_EXPIRATION key is kept for backwards compatibility
+     * but is no longer used by the application. It can be removed once
+     * all environments have the two new keys set.
+     */
+    'access_token_expiration'  => env('ACCESS_TOKEN_EXPIRATION', 15),
 
-    'expiration' => env('SANCTUM_EXPIRATION', 1440),
+    'refresh_token_expiration' => env('REFRESH_TOKEN_EXPIRATION', 43200),
 
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Middleware
-    |--------------------------------------------------------------------------
-    */
 
     'middleware' => [
         'authenticate_session' => Laravel\Sanctum\Http\Middleware\AuthenticateSession::class,
