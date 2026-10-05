@@ -73,39 +73,39 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['user' => UserResource::make($request->user('api'))]);
+        return response()->json(['user' => UserResource::make($request->user())]);
     }
 
     public function logout(Request $request): JsonResponse
     {
-        $this->auth->logout($request->user('api'));
+        $this->auth->logout($request->user(), $this->device($request));
 
         return response()->json(null, 204);
     }
 
     public function logoutAll(Request $request): JsonResponse
     {
-        $this->auth->logoutAll($request->user('api'));
+        $this->auth->logoutAll($request->user());
 
         return response()->json(null, 204);
     }
 
     public function tokens(Request $request): JsonResponse
     {
-        $user = $request->user('api');
-        $current = $user->currentAccessToken()->id;
+        $currentDevice = $this->device($request);
 
-        $tokens = $user->tokens()
-            ->where('abilities', 'not like', '%refresh%')
+        // Refresh rows only — access JWTs live client-side and are not listed.
+        $tokens = $request->user()->tokens()
+            ->where('name', 'like', '%:refresh')
             ->orderByDesc('created_at')
             ->get()
             ->map(fn ($t) => [
                 'id' => $t->id,
-                'name' => $t->name,
+                'name' => str_replace(':refresh', '', $t->name),
                 'last_used_at' => $t->last_used_at?->toIso8601String(),
                 'expires_at' => $t->expires_at?->toIso8601String(),
                 'created_at' => $t->created_at->toIso8601String(),
-                'current' => $t->id === $current,
+                'current' => str_replace(':refresh', '', $t->name) === $currentDevice,
             ]);
 
         return response()->json(['tokens' => $tokens]);
@@ -113,7 +113,7 @@ class AuthController extends Controller
 
     public function deleteToken(Request $request, int $id): JsonResponse
     {
-        if (! $this->auth->revokeToken($request->user('api'), $id)) {
+        if (! $this->auth->revokeToken($request->user(), $id)) {
             return response()->json(['error' => 'forbidden'], 403);
         }
 
@@ -128,7 +128,8 @@ class AuthController extends Controller
         ]);
 
         $ok = $this->auth->changePassword(
-            $request->user('api'),
+            $request->user(),
+            $this->device($request),
             $request->current_password,
             $request->password,
         );
@@ -138,5 +139,10 @@ class AuthController extends Controller
         }
 
         return response()->json(null, 204);
+    }
+
+    private function device(Request $request): ?string
+    {
+        return $request->attributes->get('jwt_claims')['device'] ?? null;
     }
 }

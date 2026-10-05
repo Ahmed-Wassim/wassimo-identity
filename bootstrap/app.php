@@ -16,10 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: '',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Force every request through the api guard for Sanctum token lookup.
-        // Without this, auth:sanctum falls back to the web (session) guard,
-        // and Bearer tokens are silently ignored.
-        $middleware->statefulApi();
+        $middleware->alias(['auth.jwt' => \App\Http\Middleware\AuthenticateJwt::class]);
 
         // API-only service: never redirect a guest to a login page. The
         // framework default calls route('login'), which does not exist here

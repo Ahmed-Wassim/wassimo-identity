@@ -10,6 +10,7 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthService
 {
+    public function __construct(private JwtService $jwt) {}
     // A REAL bcrypt hash, generated once per process. Hash::check against a
     // fake string throws ("does not use the Bcrypt algorithm") — which would
     // turn the unknown-email path into a 500, leaking account existence via
@@ -43,17 +44,18 @@ class AuthService
 
     public function issueTokenPair(User $user, string $deviceName): array
     {
-        $accessExpiry = now()->addMinutes((int) config('sanctum.access_token_expiration', 15));
-        $refreshExpiry = now()->addMinutes((int) config('sanctum.refresh_token_expiration', 43200));
+        // Access = stateless JWT (gateway verifies locally). Refresh = opaque
+        // Sanctum row (revocable). Rotation still replaces both each refresh.
+        $access = $this->jwt->issue($user, $deviceName);
 
-        $access = $user->createToken($deviceName, ['*'], $accessExpiry);
+        $refreshExpiry = now()->addMinutes((int) config('sanctum.refresh_token_expiration', 43200));
         $refresh = $user->createToken($deviceName.':refresh', ['refresh'], $refreshExpiry);
 
         return [
-            'access_token' => $access->plainTextToken,
+            'access_token' => $access['token'],
             'refresh_token' => $refresh->plainTextToken,
             'token_type' => 'Bearer',
-            'access_token_expires_at' => $accessExpiry->toIso8601String(),
+            'access_token_expires_at' => $access['expires_at'],
             'refresh_token_expires_at' => $refreshExpiry->toIso8601String(),
         ];
     }
@@ -94,13 +96,14 @@ class AuthService
         return $tokens;
     }
 
-    public function logout(User $user): void
+    // Only the refresh row is revoked. The access JWT stays valid until its
+    // exp (<= TTL) — the accepted no-denylist window. logout-all and password
+    // change revoke every refresh row, so the attacker cannot rotate further.
+    public function logout(User $user, ?string $deviceName): void
     {
-        $deviceName = str_replace(':refresh', '', $user->currentAccessToken()->name);
-
-        $user->tokens()
-            ->whereIn('name', [$deviceName, $deviceName.':refresh'])
-            ->delete();
+        if ($deviceName) {
+            $user->tokens()->where('name', $deviceName.':refresh')->delete();
+        }
     }
 
     public function logoutAll(User $user): void
@@ -108,7 +111,7 @@ class AuthService
         $user->tokens()->delete();
     }
 
-    public function changePassword(User $user, string $currentPassword, string $newPassword): bool
+    public function changePassword(User $user, ?string $deviceName, string $currentPassword, string $newPassword): bool
     {
         if (! Hash::check($currentPassword, $user->password)) {
             return false;
@@ -116,30 +119,26 @@ class AuthService
 
         $user->update(['password' => $newPassword]);
 
-        $deviceName = str_replace(':refresh', '', $user->currentAccessToken()->name);
-
-        // Keep caller's device pair, revoke everything else.
-        $user->tokens()
-            ->whereNotIn('name', [$deviceName, $deviceName.':refresh'])
-            ->delete();
+        // Keep the caller's refresh row, revoke every other device.
+        $query = $user->tokens();
+        if ($deviceName) {
+            $query->where('name', '!=', $deviceName.':refresh');
+        }
+        $query->delete();
 
         return true;
     }
 
+    // Devices are refresh rows now (access JWTs live client-side only).
+    // Deleting a device kills its refresh row; its access JWT lingers <= TTL.
     public function revokeToken(User $user, int $id): bool
     {
         $token = $user->tokens()->find($id);
 
-        if (! $token) {
+        if (! $token || ! str_ends_with((string) $token->name, ':refresh')) {
             return false;
         }
 
-        $deviceName = str_replace(':refresh', '', $token->name);
-
-        $user->tokens()
-            ->whereIn('name', [$deviceName, $deviceName.':refresh'])
-            ->delete();
-
-        return true;
+        return (bool) $token->delete();
     }
 }

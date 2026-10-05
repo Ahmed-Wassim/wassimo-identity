@@ -11,4 +11,5 @@ README.md
 CLAUDE.md
 AGENTS.md
 storage/logs/*
+storage/app/jwt/
 bootstrap/cache/*.php

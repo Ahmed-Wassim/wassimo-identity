@@ -13,7 +13,7 @@ Route::prefix('auth')->group(function () {
     Route::post('/refresh',  [AuthController::class, 'refresh']);
 });
 
-Route::prefix('auth')->middleware('auth:api')->group(function () {
+Route::prefix('auth')->middleware('auth.jwt')->group(function () {
     Route::get('/me',               [AuthController::class, 'me']);
     Route::post('/logout',          [AuthController::class, 'logout']);
     Route::post('/logout-all',      [AuthController::class, 'logoutAll']);
@@ -22,7 +22,7 @@ Route::prefix('auth')->middleware('auth:api')->group(function () {
     Route::post('/password/change', [AuthController::class, 'changePassword']);
 });
 
-Route::middleware('auth:api')->group(function () {
+Route::middleware('auth.jwt')->group(function () {
     Route::get('/roles',       [UserController::class, 'roles']);
     Route::get('/permissions', [UserController::class, 'permissions']);
 
