@@ -9,6 +9,10 @@ services:
       - "9075:8000"     # dev: curl localhost:9075/...
     volumes:
       - .:/var/www/html # live-reload: edit source, refresh
+    # .env is NOT in the image (.dockerignore) and NOT overlaid by the volume
+    # as config: env_file loads host .env into process env; `environment:`
+    # below overrides hostnames with Docker DNS names. The serve worker gets
+    # the full process env via --no-reload (see Dockerfile.dev).
     env_file:
       - .env
     environment:

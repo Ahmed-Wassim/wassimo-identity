@@ -21,13 +21,11 @@ RUN composer install \
         --optimize-autoloader \
         --prefer-dist
 
-# Pre-cache config/routes/views. Requires all env vars to be available at
-# build time via --build-arg, or just defer to entrypoint (see CMD below).
-# We cache after COPY . so source changes pick up the latest config.
-RUN php artisan config:cache \
-    && php artisan route:cache \
-    && php artisan view:cache \
-    || true   # don't fail the build if DB isn't available at build time
+# No config:cache / route:cache at build time on purpose. Caching here would
+# bake the BUILD environment (no DB_HOST, falls back to 127.0.0.1) into the
+# image, and a cached config ignores the RUNTIME process environment entirely
+# (the PHP counterpart of the godotenv ENV != prod guard in the Go services).
+# Cache at deploy time if you need it, after the real env is present.
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM php:8.3-cli AS runtime
@@ -55,6 +53,8 @@ USER wassimo
 EXPOSE 8000
 
 # Runs migrations then starts the server.
+# --no-reload: without it, `serve` strips the container env from the php -S
+# worker and the worker falls back to defaults (127.0.0.1). See Dockerfile.dev.
 # In a multi-replica setup, replace this with a separate deploy step that
 # runs migrations exactly once before scaling. See ADR §Migration strategy.
-CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
+CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000 --no-reload"]

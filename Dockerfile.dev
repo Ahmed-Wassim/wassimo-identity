@@ -32,7 +32,30 @@ RUN composer run-script post-autoload-dump || true
 # In dev we run as root so this is informational; the prod image fixes it.
 RUN chmod -R 775 storage bootstrap/cache
 
+# OPcache for the dev loop. Without it, `artisan serve` recompiles the whole
+# framework on EVERY request over the Windows bind mount (~6ms/file × hundreds
+# of files ≈ 2-6s each), which blows the gateway's 2s auth budget (ADR-013)
+# and makes every drill flaky.
+# File cache (not SHM): Docker Desktop's /dev/shm doesn't share opcache SHM
+# reliably with the php -S worker, so SHM stays empty. A file cache on the
+# container-local /tmp (overlayfs, NOT the bind mount) works across processes.
+# validate_timestamps + revalidate_freq=0 keeps code hot-reload exact:
+# edited files are picked up on the next request.
+RUN mkdir -p /tmp/opcache-cli && chmod 777 /tmp/opcache-cli \
+ && printf '%s\n' \
+        'opcache.enable_cli=1' \
+        'opcache.validate_timestamps=1' \
+        'opcache.revalidate_freq=0' \
+        'opcache.file_cache=/tmp/opcache-cli' \
+        'opcache.file_cache_only=1' \
+    > /usr/local/etc/php/conf.d/opcache-dev.ini
+
 EXPOSE 8000
 
 # artisan serve for the dev loop — hot reload by mounting the source volume.
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+# --no-reload is required in Docker: without it, `serve` strips the container
+# environment from the php -S worker (only a safelist passes through) and the
+# worker falls back to the .env FILE (host addresses like 127.0.0.1).
+# With --no-reload the full process env (compose overrides) reaches the worker.
+# Trade-off: editing .env needs `compose restart`, code still hot-reloads.
+CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000", "--no-reload"]

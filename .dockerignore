@@ -1,0 +1,14 @@
+.git
+.gitattributes
+.gitignore
+.env
+.env.*
+!.env.example
+vendor/
+node_modules/
+Dockerfile*
+README.md
+CLAUDE.md
+AGENTS.md
+storage/logs/*
+bootstrap/cache/*.php
