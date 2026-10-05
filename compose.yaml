@@ -75,6 +75,32 @@ services:
     networks:
       - wassimo-network
 
+  # ── identity-scheduler: runs the Laravel scheduler (prune-expired, etc.) ──
+  # schedule:run executes whatever is DUE each minute; without this process
+  # the Schedule in routes/console.php never fires in Docker. A sleep loop,
+  # not cron: one less daemon to install, second-granularity irrelevant here.
+  identity-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["sh", "-c", "while true; do php artisan schedule:run; sleep 60; done"]
+    volumes:
+      - .:/var/www/html
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - wassimo-network
+
   # ── mysql: identity_db ───────────────────────────────────────────────────
   mysql:
     image: mysql:8.4
