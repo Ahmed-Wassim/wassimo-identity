@@ -1,65 +1,49 @@
-FROM php:8.3-cli
+FROM dunglas/frankenphp:1-php8.3
 
 # ── System dependencies ───────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        unzip \
-        git \
-        libzip-dev \
-        libonig-dev \
-    && docker-php-ext-install \
+# FrankenPHP images ship install-php-extensions (no pecl dance needed).
+RUN install-php-extensions \
         pdo_mysql \
         zip \
         pcntl \
         mbstring \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+        redis \
+        opcache
 
 # ── Composer ──────────────────────────────────────────────────────────────────
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
 
-WORKDIR /var/www/html
+WORKDIR /app
 
 # ── Dependencies (layer-cached separately from source) ────────────────────────
 COPY composer.json composer.lock ./
 RUN composer install --no-interaction --no-scripts --prefer-dist
 
 # ── Application source ────────────────────────────────────────────────────────
+# Volume-mounted at runtime (compose), so COPY here only seeds the image.
 COPY . .
 RUN composer run-script post-autoload-dump || true
 
-# storage/ and bootstrap/cache must be writable by the process user.
-# In dev we run as root so this is informational; the prod image fixes it.
 RUN chmod -R 775 storage bootstrap/cache
 
-# PHP caches for the dev loop. Without them, `artisan serve` re-resolves and
-# recompiles the whole framework on EVERY request over the Windows bind mount
-# (~6ms/file × hundreds of files ≈ 2-6s each), which blows the gateway's 2s
-# auth budget (ADR-013) and makes every drill flaky.
-# File cache (not SHM): Docker Desktop's /dev/shm doesn't share opcache SHM
-# reliably with the php -S worker, so SHM stays empty. A file cache on the
-# container-local /tmp (overlayfs, NOT the bind mount) works across processes.
-# validate_timestamps + revalidate_freq=0 keeps code hot-reload exact:
-# edited files are picked up on the next request.
-# realpath_cache: PHP caches resolved paths in memory per process — sized for
-# thousands of vendor files so repeat resolves never re-hit the slow mount.
-RUN mkdir -p /tmp/opcache-cli && chmod 777 /tmp/opcache-cli \
- && printf '%s\n' \
+# PHP caches for the worker. FrankenPHP keeps ONE booted app in memory, so
+# per-request boot cost disappears structurally (the artisan-serve problem this
+# replaces). SHM works here (real SAPI, unlike php -S quirks), so no file
+# cache games: plain opcache + timestamp validation for hot reload.
+RUN printf '%s\n' \
+        'opcache.enable=1' \
         'opcache.enable_cli=1' \
         'opcache.validate_timestamps=1' \
         'opcache.revalidate_freq=0' \
-        'opcache.file_cache=/tmp/opcache-cli' \
-        'opcache.file_cache_only=1' \
         'realpath_cache_size=4096K' \
         'realpath_cache_ttl=600' \
     > /usr/local/etc/php/conf.d/php-dev.ini
 
 EXPOSE 8000
 
-# artisan serve for the dev loop — hot reload by mounting the source volume.
-# --no-reload is required in Docker: without it, `serve` strips the container
-# environment from the php -S worker (only a safelist passes through) and the
-# worker falls back to the .env FILE (host addresses like 127.0.0.1).
-# With --no-reload the full process env (compose overrides) reaches the worker.
-# Trade-off: editing .env needs `compose restart`, code still hot-reloads.
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000", "--no-reload"]
+# Octane + FrankenPHP worker. --watch restarts workers on file change (dev
+# hot-reload); --max-requests recycles each worker (memory-leak safety).
+# NOTE: no `serve --no-reload` env-stripping issue here — Octane runs in the
+# artisan process itself, so compose environment reaches workers directly.
+CMD ["php", "artisan", "octane:start", "--server=frankenphp", \
+     "--host=0.0.0.0", "--port=8000", "--watch", "--max-requests=500"]

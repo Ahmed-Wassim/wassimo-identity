@@ -8,7 +8,7 @@ services:
     ports:
       - "9075:8000"     # dev: curl localhost:9075/...
     volumes:
-      - .:/var/www/html # live-reload: edit source, refresh
+      - .:/app # live-reload: edit source, refresh
     # .env is NOT in the image (.dockerignore) and NOT overlaid by the volume
     # as config: env_file loads host .env into process env; `environment:`
     # below overrides hostnames with Docker DNS names. The serve worker gets
@@ -59,7 +59,7 @@ services:
       dockerfile: Dockerfile.dev
     command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--max-time=3600"]
     volumes:
-      - .:/var/www/html
+      - .:/app
     env_file:
       - .env
     environment:
@@ -85,7 +85,7 @@ services:
       dockerfile: Dockerfile.dev
     command: ["sh", "-c", "while true; do php artisan schedule:run; sleep 60; done"]
     volumes:
-      - .:/var/www/html
+      - .:/app
     env_file:
       - .env
     environment:
